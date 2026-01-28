@@ -53,18 +53,8 @@ jobs:
         
     - name: Create deployment package
       run: |
-        mkdir -p deployment
-        echo "Copying files to deployment package..."
-        cp -rv build/ public/ package.json package-lock.json deployment/
-        [ -d app ] && echo "Copying app directory" && cp -rv app deployment/
-        # [ -d prisma ] && echo "Copying prisma directory" && cp -rv prisma deployment/
-        
-        # Copy ecosystem files but exclude .env
-        echo "Copying ecosystem files..."
-        [ -f ecosystem-realassets.config.js ] && cp -v ecosystem-realassets.config.js deployment/
-
-        echo "Deployment package contents:"
-        ls -la deployment/
+        echo "Deployment package contents (build folder):"
+        ls -la build/
         
     - name: Install sshpass for password authentication
       run: sudo apt-get install -y sshpass
@@ -78,30 +68,21 @@ jobs:
         echo "Testing SSH connection with password..."
         sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no -v ${{ env.USERNAME }}@${{ env.HOSTNAME }} "echo 'SSH connection successful'; pwd"
         
-    - name: Deploy to DEV (Production) environment
+    - name: Deploy to Production environment
       run: |
         echo "🚀 Creating remote Real Assets directory..."
-        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "mkdir -pv ${{ env.PROD_DEPLOY_PATH}} && ls -la ${{ env.PROD_DEPLOY_PATH}}"
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "mkdir -pv ${{ env.PROD_DEPLOY_PATH}}"
         
-        echo "📦 Starting rsync to Real Assets with password authentication..."
-        sshpass -p "${{ env.PASSWORD }}" rsync -avz --progress --delete --exclude='node_modules' --exclude='.env' -e "ssh -o StrictHostKeyChecking=no" deployment/ ${{ env.USERNAME }}@${{ env.HOSTNAME }}:${{ env.PROD_DEPLOY_PATH}}
+        echo "📦 Deploying static build files to server..."
+        sshpass -p "${{ env.PASSWORD }}" rsync -avz --progress --delete -e "ssh -o StrictHostKeyChecking=no" build/ ${{ env.USERNAME }}@${{ env.HOSTNAME }}:${{ env.PROD_DEPLOY_PATH}}
         
-        echo "📥 Installing production dependencies and generating Prisma client for PROD..."
-        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "cd ${{ env.PROD_DEPLOY_PATH}} && \
-          echo 'Current directory:'; pwd; \
-          echo 'Files in deployment path:'; ls -la; \
-          npm ci --production"
-        
-        echo "⚡ Starting/Restarting Real Assets application with PM2..."
-        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "cd ${{ env.PROD_DEPLOY_PATH}} && \
-          pm2 delete realassets || echo 'No existing process to delete'; \
-          PORT=3040 pm2 start ecosystem-realassets.config.js --env production && \
-          pm2 save && \
-          pm2 startup && \
-          pm2 list"
+        echo "� Verifying deployment..."
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "ls -la ${{ env.PROD_DEPLOY_PATH}}"
 
-    - name: Cleanup
-      run: rm -rf deployment
+    - name: Reload Nginx
+      run: |
+        echo "🔄 Reloading Nginx to serve updated files..."
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "nginx -t && systemctl reload nginx"
       
     - name: Debug - Final status
       run: echo "✅ Real Assets production deployment workflow completed with status $?"
@@ -114,9 +95,8 @@ jobs:
         echo "Branch:           dev"
         echo "Environment:      Production (PROD)"
         echo "Deploy Path:      ${{ env.PROD_DEPLOY_PATH }}"
-        echo "PM2 Process:      realassets"
+        echo "Server:           Nginx (static files)"
         echo "Port:             3040"
-        echo "Ecosystem File:   ecosystem-realassets.config.js"
         echo "Node Version:     23.9.0"
         echo "Status:           ✅ Completed"
         echo "=========================================="
