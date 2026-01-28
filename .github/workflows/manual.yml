@@ -1,0 +1,102 @@
+# Deploy to Real Assets Production Environment
+# Triggers on push to dev branch
+# Deploys to /home/thevalb9c4y6/public_html/realassets/ on Rocky Linux v8.10.0
+name: Deploy to Real Assets (Production)
+
+on:
+  push:
+    branches: [ master ]
+
+env:
+  HOSTNAME: thevalua.dedicated.co.za
+  USERNAME: root
+  PASSWORD: ${{ secrets.SSH_PASSWORD }}
+  PROD_DEPLOY_PATH: /home/thevalb9c4y6/public_html/realassets/
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      name: Checkout code
+      
+    - name: Debug - List files in repository
+      run: ls -la
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '23.9.0'
+        
+    - name: Debug - Verify Node.js and npm
+      run: |
+        node -v
+        npm -v
+        
+    - name: Install dependencies
+      run: npm i
+
+    # - name: Generate Prisma client
+      # run: npx prisma generate
+      
+    - name: Debug - Verify installed dependencies
+      run: npm list --depth=0
+      
+    - name: Build application
+      run: npm run build
+      
+    - name: Debug - Verify build output
+      run: |
+        ls -la build/
+        [ -d public ] && ls -la public/
+        
+    - name: Create deployment package
+      run: |
+        echo "Deployment package contents (build folder):"
+        ls -la build/
+        
+    - name: Install sshpass for password authentication
+      run: sudo apt-get install -y sshpass
+        
+    - name: Verify SSH connection with password
+      run: |
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "echo 'SSH test successful'"
+        
+    - name: Debug - Verify SSH setup
+      run: |
+        echo "Testing SSH connection with password..."
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no -v ${{ env.USERNAME }}@${{ env.HOSTNAME }} "echo 'SSH connection successful'; pwd"
+        
+    - name: Deploy to Production environment
+      run: |
+        echo "🚀 Creating remote Real Assets directory..."
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "mkdir -pv ${{ env.PROD_DEPLOY_PATH}}"
+        
+        echo "📦 Deploying static build files to server..."
+        sshpass -p "${{ env.PASSWORD }}" rsync -avz --progress --delete -e "ssh -o StrictHostKeyChecking=no" build/ ${{ env.USERNAME }}@${{ env.HOSTNAME }}:${{ env.PROD_DEPLOY_PATH}}
+        
+        echo "� Verifying deployment..."
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "ls -la ${{ env.PROD_DEPLOY_PATH}}"
+
+    - name: Reload Nginx
+      run: |
+        echo "🔄 Reloading Nginx to serve updated files..."
+        sshpass -p "${{ env.PASSWORD }}" ssh -o StrictHostKeyChecking=no ${{ env.USERNAME }}@${{ env.HOSTNAME }} "nginx -t && systemctl reload nginx"
+      
+    - name: Debug - Final status
+      run: echo "✅ Real Assets production deployment workflow completed with status $?"
+      
+    - name: Deployment Summary
+      run: |
+        echo "=========================================="
+        echo "  REAL ASSETS PRODUCTION DEPLOYMENT SUMMARY"
+        echo "=========================================="
+        echo "Branch:           dev"
+        echo "Environment:      Production (PROD)"
+        echo "Deploy Path:      ${{ env.PROD_DEPLOY_PATH }}"
+        echo "Server:           Nginx (static files)"
+        echo "Port:             3040"
+        echo "Node Version:     23.9.0"
+        echo "Status:           ✅ Completed"
+        echo "=========================================="
